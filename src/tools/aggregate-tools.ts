@@ -27,6 +27,7 @@ import {
   computeConsensusRating,
   parseChinaTravelHighlights,
 } from "../utils/normalizer.js";
+import { normalizeTerraReviewLanguage } from "./tripadvisor-tools.js";
 
 export interface ProviderRegistry {
   chinaTravel?: ChinaTravelProvider;
@@ -193,16 +194,17 @@ async function queryTripAdvisorComparison(
     let reviews: NormalizedReview[] | undefined;
 
     if (params.includeReviews) {
+      const reviewLang = normalizeTerraReviewLanguage(params.language);
       const revResult = await provider
         .getLocationReviews({
           locationId,
-          language: params.language,
+          language: reviewLang,
           sort_by: "MOST_RECENT",
         })
         .catch(() => undefined);
 
       reviews = revResult?.reviews;
-      if ((!reviews || reviews.length === 0) && params.language) {
+      if ((!reviews || reviews.length === 0) && reviewLang) {
         const fallbackRev = await provider
           .getLocationReviews({
             locationId,

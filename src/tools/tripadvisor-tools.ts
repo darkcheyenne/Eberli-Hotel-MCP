@@ -30,6 +30,37 @@ const locationIdSchema = z
   .union([z.string().trim().min(1), z.number().int().positive()])
   .describe("TripAdvisor Location ID");
 
+const TERRA_LOCALE_MAP: Record<string, string> = {
+  en: "en-US",
+  de: "de-DE",
+  zh: "zh-CN",
+  fr: "fr-FR",
+  es: "es-ES",
+  it: "it-IT",
+  ja: "ja-JP",
+  ko: "ko-KR",
+  pt: "pt-PT",
+  ru: "ru-RU",
+  nl: "nl-NL",
+};
+
+export function normalizeTerraLocale(locale?: string): string | undefined {
+  if (!locale) return undefined;
+  const trimmed = locale.trim();
+  if (!trimmed) return undefined;
+  const lower = trimmed.toLowerCase();
+  if (TERRA_LOCALE_MAP[lower]) return TERRA_LOCALE_MAP[lower];
+  return trimmed.replace("_", "-");
+}
+
+export function normalizeTerraReviewLanguage(lang?: string): string | undefined {
+  if (!lang) return undefined;
+  const trimmed = lang.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.toLowerCase().startsWith("zh")) return undefined;
+  return trimmed.split(/[-_]/)[0]?.toLowerCase();
+}
+
 /**
  * Registers all TripAdvisor Terra API MCP tools (ta_*).
  */
@@ -50,7 +81,10 @@ export function registerTripAdvisorTools(
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     withToolErrorHandling("tripadvisor_terra", async (args) => {
-      const result = await provider.searchLocations(args);
+      const result = await provider.searchLocations({
+        ...args,
+        locale: normalizeTerraLocale(args.locale),
+      });
       return jsonToolResult({
         provider: "tripadvisor_terra",
         endpoint: "/locations/search",
@@ -73,7 +107,10 @@ export function registerTripAdvisorTools(
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     withToolErrorHandling("tripadvisor_terra", async (args) => {
-      const result = await provider.searchCatalog(args);
+      const result = await provider.searchCatalog({
+        ...args,
+        locale: normalizeTerraLocale(args.locale),
+      });
       return jsonToolResult({
         provider: "tripadvisor_terra",
         endpoint: "/catalog/locations/search",
@@ -99,7 +136,10 @@ export function registerTripAdvisorTools(
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     withToolErrorHandling("tripadvisor_terra", async (args) => {
-      const result = await provider.getLocationDetails(args.locationId, args.locale);
+      const result = await provider.getLocationDetails(
+        args.locationId,
+        normalizeTerraLocale(args.locale),
+      );
       const intel = await resolveHotelIntelligence({
         hotelName: result.location.name,
         city: result.location.city,
@@ -172,7 +212,10 @@ export function registerTripAdvisorTools(
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     withToolErrorHandling("tripadvisor_terra", async (args) => {
-      const result = await provider.getLocationReviews(args);
+      const result = await provider.getLocationReviews({
+        ...args,
+        language: normalizeTerraReviewLanguage(args.language),
+      });
 
       // If a specific language was requested (e.g. "de") and Terra returned 0 reviews in that language,
       // also fetch default-language reviews so the caller still gets review content and topic analysis.
