@@ -14,14 +14,25 @@ import {
  * Defensive TripAdvisor Terra API types:
  * Terra omits fields that lack data instead of returning `null`.
  */
+export interface TerraLocalizedString {
+  language?: string;
+  value?: string;
+  primary?: boolean;
+}
+
 export interface TerraAddress {
   street1?: string;
   street2?: string;
+  street_address?: string;
   city?: string;
   state?: string;
   country?: string;
+  country_name?: string;
+  country_code?: string;
   postalcode?: string;
+  postal_code?: string;
   address_string?: string;
+  formatted?: string;
 }
 
 export interface TerraCategoryInfo {
@@ -30,29 +41,67 @@ export interface TerraCategoryInfo {
 }
 
 export interface TerraSubrating {
+  type?: string;
   name?: string;
   localized_name?: string;
   type_name?: string;
   value?: string | number;
+  rating?: string | number;
+  count?: number;
   rating_image_url?: string;
-  icon_url?: { key?: string; url?: string };
+  icon_url?: string | { key?: string; url?: string };
 }
 
 export interface TerraLocation {
+  id?: string | number;
   location_id?: string | number;
   name?: string;
+  names?: TerraLocalizedString[];
   description?: string;
+  descriptions?: TerraLocalizedString[];
   web_url?: string;
+  urls?: {
+    tripadvisor?: {
+      main?: string;
+      photos?: string;
+      write_review?: string;
+      questions_answers?: string;
+    };
+    official?: string;
+  };
   address_obj?: TerraAddress;
+  addresses?: TerraAddress[];
   latitude?: string | number;
   longitude?: string | number;
+  coordinates?: {
+    latitude?: number | string;
+    longitude?: number | string;
+  };
   timezone?: string;
   phone?: string;
+  phone_numbers?: Array<{ value?: string; type?: string }>;
   website?: string;
   email?: string;
+  official_email?: string;
   rating?: string | number;
   num_reviews?: string | number;
+  overall_rating?: {
+    rating?: number | string;
+    count?: number | string;
+    icon_url?: string;
+  };
+  traveler_ratings?: {
+    overall?: {
+      rating?: number | string;
+      count?: number | string;
+      icon_url?: string;
+    };
+    subratings?: TerraSubrating[];
+  };
   photo_count?: string | number;
+  photos?: {
+    total_count?: number;
+  };
   price_level?: string;
   category?: TerraCategoryInfo | string;
   subcategory?: TerraCategoryInfo[];
@@ -67,6 +116,7 @@ export interface TerraLocation {
   };
   amenities?: string[];
   awards?: Array<{ award_type?: string; year?: string | number; display_name?: string }>;
+  location?: TerraLocation;
 }
 
 export interface TerraPagination {
@@ -84,9 +134,10 @@ export interface TerraPagedLocationsResponse {
 export interface TerraReview {
   id?: string | number;
   location_id?: string | number;
-  title?: string;
-  text?: string;
+  title?: string | TerraLocalizedString[];
+  text?: string | TerraLocalizedString[];
   rating?: number | string;
+  publish_ts?: string;
   published_date?: string;
   published_at?: string;
   travel_date?: string;
@@ -96,6 +147,7 @@ export interface TerraReview {
   url?: string;
   user?: {
     username?: string;
+    geo?: string;
     user_location?: { name?: string };
   };
   subratings?: Record<string, TerraSubrating> | TerraSubrating[];
@@ -114,9 +166,18 @@ export interface TerraReviewsResponse {
 
 export interface TerraPhoto {
   id?: string | number;
+  location_id?: string | number;
   caption?: string;
+  publish_ts?: string;
   published_date?: string;
   original_size_url?: string;
+  photo?: {
+    key?: string;
+    original_size_url?: string;
+    original_height?: number;
+    original_width?: number;
+    media_type?: string;
+  };
   is_blessed?: boolean;
   album?: string;
   source?: {
@@ -426,14 +487,28 @@ export class TripAdvisorTerraProvider {
       photos: rawPhotos.map((photo) => ({
         id: photo.id !== undefined ? String(photo.id) : undefined,
         caption: photo.caption,
-        url: photo.original_size_url,
+        url: photo.photo?.original_size_url ?? photo.original_size_url,
         source: photo.source?.localized_name ?? photo.source?.name,
-        publishedDate: photo.published_date,
+        publishedDate: photo.publish_ts ?? photo.published_date,
         author: photo.user?.username,
       })),
       pagination: data?.pagination,
       cached,
     };
+  }
+
+  static pickLocalizedString(
+    input: string | TerraLocalizedString[] | undefined,
+  ): { value?: string; language?: string } {
+    if (typeof input === "string") {
+      return { value: input };
+    }
+    if (Array.isArray(input) && input.length > 0) {
+      const primary = input.find((item) => item?.primary && typeof item.value === "string");
+      const chosen = primary ?? input.find((item) => typeof item?.value === "string");
+      return { value: chosen?.value, language: chosen?.language };
+    }
+    return {};
   }
 
   static parseSubratings(
@@ -444,8 +519,8 @@ export class TripAdvisorTerraProvider {
     const result: Record<string, number> = {};
     for (const item of entries) {
       if (!item) continue;
-      const label = item.type_name ?? item.localized_name ?? item.name;
-      const numericVal = toOptionalNumber(item.value);
+      const label = item.type_name ?? item.localized_name ?? item.name ?? item.type;
+      const numericVal = toOptionalNumber(item.rating ?? item.value);
       if (label && numericVal !== undefined) {
         result[label] = numericVal;
       }
@@ -453,17 +528,22 @@ export class TripAdvisorTerraProvider {
     return Object.keys(result).length > 0 ? result : undefined;
   }
 
-  static parseLocation(raw: TerraLocation): TerraParsedLocation {
+  static parseLocation(rawWrapper: TerraLocation): TerraParsedLocation {
+    const raw = rawWrapper.location ?? rawWrapper;
+    const matchedValue = rawWrapper.matched_value ?? raw.matched_value;
+
+    const primaryAddress = raw.addresses?.[0] ?? raw.address_obj;
     const addressParts = [
-      raw.address_obj?.street1,
-      raw.address_obj?.city,
-      raw.address_obj?.state,
-      raw.address_obj?.postalcode,
-      raw.address_obj?.country,
+      primaryAddress?.street_address ?? primaryAddress?.street1,
+      primaryAddress?.city,
+      primaryAddress?.state,
+      primaryAddress?.postal_code ?? primaryAddress?.postalcode,
+      primaryAddress?.country_name ?? primaryAddress?.country,
     ].filter((part): part is string => typeof part === "string" && part.trim().length > 0);
 
     const address =
-      raw.address_obj?.address_string ??
+      primaryAddress?.formatted ??
+      primaryAddress?.address_string ??
       (addressParts.length > 0 ? addressParts.join(", ") : undefined);
 
     const category =
@@ -471,40 +551,58 @@ export class TripAdvisorTerraProvider {
         ? raw.category
         : raw.category?.localized_name ?? raw.category?.name;
 
+    const rawId = raw.id ?? raw.location_id;
+    const resolvedName =
+      TripAdvisorTerraProvider.pickLocalizedString(raw.names).value ??
+      raw.name ??
+      "Unnamed Location";
+    const resolvedDescription =
+      TripAdvisorTerraProvider.pickLocalizedString(raw.descriptions).value ?? raw.description;
+
+    const ratingScore =
+      raw.traveler_ratings?.overall?.rating ?? raw.overall_rating?.rating ?? raw.rating;
+    const reviewCount =
+      raw.traveler_ratings?.overall?.count ?? raw.overall_rating?.count ?? raw.num_reviews;
+
+    const subratingsSource = raw.traveler_ratings?.subratings ?? raw.subratings;
+
     return {
-      locationId: raw.location_id !== undefined ? String(raw.location_id) : "unknown",
-      name: raw.name ?? "Unnamed Location",
-      description: raw.description,
+      locationId: rawId !== undefined ? String(rawId) : "unknown",
+      name: resolvedName,
+      description: resolvedDescription,
       address,
-      city: raw.address_obj?.city,
-      country: raw.address_obj?.country,
-      latitude: toOptionalNumber(raw.latitude),
-      longitude: toOptionalNumber(raw.longitude),
-      webUrl: raw.web_url,
-      website: raw.website,
-      phone: raw.phone,
+      city: primaryAddress?.city,
+      country: primaryAddress?.country_name ?? primaryAddress?.country,
+      latitude: toOptionalNumber(raw.coordinates?.latitude ?? raw.latitude),
+      longitude: toOptionalNumber(raw.coordinates?.longitude ?? raw.longitude),
+      webUrl: raw.urls?.tripadvisor?.main ?? raw.web_url,
+      website: raw.urls?.official ?? raw.website,
+      phone: raw.phone_numbers?.[0]?.value ?? raw.phone,
       priceTier: normalizePriceLevel(raw.price_level),
       rawPriceLevel: raw.price_level,
-      rating: normalizeRating("tripadvisor_terra", raw.rating, 5, raw.num_reviews),
+      rating: normalizeRating("tripadvisor_terra", ratingScore, 5, reviewCount),
       category,
       ranking: raw.ranking_data?.ranking_string,
       amenities: Array.isArray(raw.amenities) ? raw.amenities : undefined,
-      subratings: TripAdvisorTerraProvider.parseSubratings(raw.subratings),
-      matchedValue: raw.matched_value,
+      subratings: TripAdvisorTerraProvider.parseSubratings(subratingsSource),
+      matchedValue,
     };
   }
 
   static parseReview(raw: TerraReview): NormalizedReview {
+    const titleObj = TripAdvisorTerraProvider.pickLocalizedString(raw.title);
+    const textObj = TripAdvisorTerraProvider.pickLocalizedString(raw.text);
+
     return {
       provider: "tripadvisor_terra",
       id: raw.id !== undefined ? String(raw.id) : undefined,
       author: raw.user?.username,
       ratingOutOf5: toOptionalNumber(raw.rating),
-      title: raw.title,
-      text: raw.text,
-      publishedAt: raw.published_date ?? raw.published_at,
+      title: titleObj.value,
+      text: textObj.value,
+      publishedAt: raw.publish_ts ?? raw.published_date ?? raw.published_at,
       tripType: raw.trip_type,
-      language: raw.language ?? raw.lang,
+      language: raw.language ?? raw.lang ?? textObj.language ?? titleObj.language,
       subratings: TripAdvisorTerraProvider.parseSubratings(raw.subratings),
     };
   }

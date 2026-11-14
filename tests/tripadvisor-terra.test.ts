@@ -170,4 +170,122 @@ describe("TripAdvisorTerraProvider", () => {
     const photos = await provider.getLocationPhotos("777");
     expect(photos.photos[0]?.url).toBe("https://media-cdn.tripadvisor.com/photo.jpg");
   });
+
+  it("parses nested Terra v1 location, review, and photo payload shapes", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                location: {
+                  id: 196060,
+                  names: [
+                    { language: "en", value: "baur au lac zürich", primary: false },
+                    { language: "en", value: "Baur Au Lac", primary: true },
+                  ],
+                  descriptions: [{ language: "en", value: "Historic hotel since 1844." }],
+                  addresses: [
+                    {
+                      street_address: "Talstrasse 1",
+                      city: "Zurich",
+                      country_name: "Switzerland",
+                      postal_code: "8001",
+                      formatted: "Talstrasse 1, Zurich 8001 Switzerland",
+                    },
+                  ],
+                  coordinates: { latitude: 47.367364, longitude: 8.539124 },
+                  overall_rating: { rating: 4.7, count: 1206 },
+                  urls: {
+                    tripadvisor: { main: "https://www.tripadvisor.com/Hotel_Review-d196060" },
+                    official: "http://www.bauraulac.ch",
+                  },
+                },
+              },
+            ],
+            pagination: { page: 1, size: 1, total_pages: 1, total_elements: 1 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 1084154727,
+                publish_ts: "2026-11-02T15:34:49.784Z",
+                rating: 5,
+                trip_type: "FRIENDS",
+                user: { username: "michaelnZ9512YY" },
+                title: [{ language: "en", value: "Serenity", primary: true }],
+                text: [{ language: "en", value: "Excellent location.", primary: true }],
+                subratings: [{ type: "RATE_CLEANLINESS", rating: 5, type_name: "Cleanliness" }],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 411812385,
+                photo: {
+                  original_size_url: "https://dynamic-media.tacdn.com/media/photo-o/sample.jpg",
+                },
+                publish_ts: "2019-07-28T19:51:48.103Z",
+                source: { name: "Management" },
+                caption: "Dahlia Cottage",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+
+    const provider = new TripAdvisorTerraProvider({
+      apiKey: "terra-test-key",
+      cache: new TtlCache({ ttlSeconds: 60 }),
+      fetchImpl: fetchMock,
+    });
+
+    const catalog = await provider.searchCatalog({ query: "Baur Au Lac" });
+    expect(catalog.locations[0]).toMatchObject({
+      locationId: "196060",
+      name: "Baur Au Lac",
+      address: "Talstrasse 1, Zurich 8001 Switzerland",
+      city: "Zurich",
+      country: "Switzerland",
+      latitude: 47.367364,
+      longitude: 8.539124,
+      webUrl: "https://www.tripadvisor.com/Hotel_Review-d196060",
+      website: "http://www.bauraulac.ch",
+      rating: {
+        rawScore: 4.7,
+        normalizedOutOf5: 4.7,
+        normalizedOutOf100: 94,
+        reviewCount: 1206,
+      },
+    });
+
+    const reviews = await provider.getLocationReviews({ locationId: 196060 });
+    expect(reviews.reviews[0]).toMatchObject({
+      id: "1084154727",
+      title: "Serenity",
+      text: "Excellent location.",
+      publishedAt: "2026-11-02T15:34:49.784Z",
+      subratings: { Cleanliness: 5 },
+    });
+
+    const photos = await provider.getLocationPhotos(196060);
+    expect(photos.photos[0]).toMatchObject({
+      id: "411812385",
+      url: "https://dynamic-media.tacdn.com/media/photo-o/sample.jpg",
+      publishedDate: "2019-07-28T19:51:48.103Z",
+    });
+  });
 });
