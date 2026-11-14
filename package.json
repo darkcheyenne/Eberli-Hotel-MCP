@@ -1,6 +1,6 @@
 {
   "name": "travel-hotel-intelligence-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Unified private Travel & Hotel Intelligence MCP Server integrating China Travel (TripGenie), TripAdvisor Terra API, and Google Places API (New).",
   "type": "module",
   "main": "dist/index.js",

@@ -79,7 +79,8 @@ The GitHub Actions workflow in [.github/workflows/docker.yml](.github/workflows/
 ## Tools
 
 ### China Travel (`china_*`)
-- `china_search_hotels`
+- `china_search_hotels` (supports `area`, `tier`, `maxPriceUsd`, `keyword`, `limit`)
+- `china_get_hotel_reviews` (Trip.com reviews up to 20 + `topicStats` & `snippets`)
 - `china_search_flights`
 - `china_search_attractions`
 - `china_plan_itinerary`
@@ -88,8 +89,8 @@ The GitHub Actions workflow in [.github/workflows/docker.yml](.github/workflows/
 ### TripAdvisor Terra (`ta_*`)
 - `ta_search_locations` (allowlist-restricted)
 - `ta_search_catalog` (full catalog ID discovery)
-- `ta_get_location_details`
-- `ta_get_location_reviews`
+- `ta_get_location_details` (includes structured `amenities`, `sources`, and `pricing`)
+- `ta_get_location_reviews` (supports full-text `query` and `topics` with `topicStats` & `snippets`)
 - `ta_get_location_photos`
 
 ### Google Places (New) (`gplaces_*`)
@@ -98,5 +99,7 @@ The GitHub Actions workflow in [.github/workflows/docker.yml](.github/workflows/
 - `gplaces_get_place_details`
 - `gplaces_get_place_photo`
 
-### Cross-Provider Intelligence
-- `compare_hotel_intelligence`
+### Cross-Provider Intelligence & Hotel Checklist
+- `compare_hotel_intelligence` (with `amenities`, `pricing`, `candidates`, `matchConfidence`, `providerDivergence`, `language`, and `criteriaEvaluation`)
+- `evaluate_hotel_criteria` (5-point checklist evaluation with `verdict: pass | fail | unknown`, `evidence[]`, and `confidence`)
+- `compare_hotels_batch` (city-wide batch comparison up to 30 hotels with disambiguation and summary table)

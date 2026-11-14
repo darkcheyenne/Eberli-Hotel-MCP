@@ -16,7 +16,22 @@ export interface ChinaHotelSearchInput {
   guests?: number;
   budget?: string;
   preferences?: string;
+  area?: string;
+  tier?: string;
+  maxPriceUsd?: number;
+  keyword?: string;
+  limit?: number;
   locale?: string;
+}
+
+export interface ChinaHotelReviewsInput {
+  hotelName?: string;
+  hotelId?: string;
+  city?: string;
+  limit?: number;
+  language?: string;
+  query?: string;
+  topics?: string[];
 }
 
 export interface ChinaFlightSearchInput {
@@ -169,21 +184,48 @@ export class ChinaTravelProvider {
   async searchHotels(input: ChinaHotelSearchInput): Promise<ChinaTravelResult> {
     const guests = input.guests ?? 2;
     const parts: string[] = [`Find hotels in ${input.city}`];
+    if (input.area) {
+      parts.push(`area/district: ${input.area}`);
+    }
     if (input.check_in && input.check_out) {
       parts.push(`from ${input.check_in} to ${input.check_out}`);
     }
     parts.push(`for ${guests} guest${guests > 1 ? "s" : ""}`);
+    if (input.tier) {
+      parts.push(`tier: ${input.tier}`);
+    }
     if (input.budget) {
       parts.push(`budget: ${input.budget}`);
     }
+    if (input.maxPriceUsd !== undefined) {
+      parts.push(`max price: $${input.maxPriceUsd} USD/night`);
+    }
+    if (input.keyword) {
+      parts.push(`keyword: ${input.keyword}`);
+    }
     if (input.preferences) {
       parts.push(`preferences: ${input.preferences}`);
+    }
+    if (input.limit !== undefined) {
+      parts.push(`limit: top ${input.limit} hotels`);
     }
     parts.push(
       "Include hotel names, prices per night, ratings, key features, and booking links.",
     );
 
     return this.queryTripGenie(parts.join(", "), input.locale ?? "en", "hotel");
+  }
+
+  async getHotelReviews(input: ChinaHotelReviewsInput): Promise<ChinaTravelResult> {
+    const target = input.hotelName ?? input.hotelId ?? "Hotel";
+    const cityPart = input.city ? ` in ${input.city}` : "";
+    const lang = input.language ?? "de";
+    const limit = Math.min(20, Math.max(1, input.limit ?? 10));
+    const topicFilter = input.query ? ` focusing on "${input.query}"` : "";
+
+    const prompt = `Return ONLY valid JSON (no markdown) for hotel "${target}"${cityPart} with Trip.com guest reviews${topicFilter} and topic analysis: {"hotelName": string, "tripComRatingOutOf10": number, "totalReviews": number, "topicStats": {"breakfast": {"mentions": number, "reviews": number, "negative": number}, "smoking": {"mentions": number, "reviews": number, "negative": number}, "noise": {"mentions": number, "reviews": number, "negative": number}, "pool": {"mentions": number, "reviews": number, "negative": number}, "cleanliness": {"mentions": number, "reviews": number, "negative": number}, "service": {"mentions": number, "reviews": number, "negative": number}, "laundry": {"mentions": number, "reviews": number, "negative": number}}, "reviews": [{"id": string, "author": string, "ratingOutOf5": number, "ratingOutOf10": number, "title": string, "text": string, "publishedAt": string, "tripType": string, "language": "${lang}"}]} Provide up to ${limit} detailed reviews in language "${lang}".`;
+
+    return this.queryTripGenie(prompt, lang, "query");
   }
 
   async searchFlights(input: ChinaFlightSearchInput): Promise<ChinaTravelResult> {

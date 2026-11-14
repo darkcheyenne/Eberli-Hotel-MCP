@@ -29,11 +29,14 @@ describe("MCP Server integration & graceful provider loading", () => {
     expect(created.enabledProviders).toEqual(["china_travel"]);
     expect(created.registeredTools).toEqual([
       "china_search_hotels",
+      "china_get_hotel_reviews",
       "china_search_flights",
       "china_search_attractions",
       "china_plan_itinerary",
       "china_get_travel_tips",
       "compare_hotel_intelligence",
+      "evaluate_hotel_criteria",
+      "compare_hotels_batch",
     ]);
     expect(warnings.some((w) => w.includes("TRIPADVISOR_TERRA_API_KEY"))).toBe(true);
     expect(warnings.some((w) => w.includes("GOOGLE_PLACES_API_KEY"))).toBe(true);
@@ -45,6 +48,9 @@ describe("MCP Server integration & graceful provider loading", () => {
     const listResult = await client.listTools();
     const names = listResult.tools.map((t) => t.name);
     expect(names).toContain("china_search_hotels");
+    expect(names).toContain("china_get_hotel_reviews");
+    expect(names).toContain("evaluate_hotel_criteria");
+    expect(names).toContain("compare_hotels_batch");
     expect(names).not.toContain("ta_search_locations");
     expect(names).not.toContain("gplaces_search_text");
 
@@ -52,7 +58,7 @@ describe("MCP Server integration & graceful provider loading", () => {
     await created.server.close();
   });
 
-  it("registers all 15 tools when all providers are configured and handles cross-provider hotel comparison", async () => {
+  it("registers all 18 tools when all providers are configured and handles hotel checklist features", async () => {
     const config = loadConfig({
       TRIPADVISOR_TERRA_API_KEY: "ta-secret",
       GOOGLE_PLACES_API_KEY: "gp-secret",
@@ -72,6 +78,30 @@ describe("MCP Server integration & graceful provider loading", () => {
       }
 
       if (url.includes("terra.tripadvisor.com/api/locations/search")) {
+        if (url.includes("Grand+Hyatt") || url.includes("Grand%20Hyatt")) {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  location_id: "33458379",
+                  name: "The Grand Hyatt Hotel",
+                  address_obj: { city: "Shenzhen", street1: "Bao'an District" },
+                  rating: "3.5",
+                  num_reviews: "12",
+                },
+                {
+                  location_id: "1526508",
+                  name: "Grand Hyatt Shenzhen",
+                  address_obj: { city: "Shenzhen", street1: "1881 Baoan Nan Road, Luohu" },
+                  rating: "4.5",
+                  num_reviews: "1850",
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+
         return new Response(
           JSON.stringify({
             data: [{ location_id: "1001", name: "The Peninsula Shanghai" }],
@@ -83,7 +113,14 @@ describe("MCP Server integration & graceful provider loading", () => {
       if (url.includes("terra.tripadvisor.com/api/locations/1001/reviews")) {
         return new Response(
           JSON.stringify({
-            data: [{ id: 1, title: "Iconic Bund view", rating: 5, text: "Impeccable." }],
+            data: [
+              {
+                id: 1,
+                title: "Iconic Bund view and great breakfast",
+                rating: 5,
+                text: "Impeccable service. The Western breakfast buffet and heated indoor pool were fantastic.",
+              },
+            ],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -98,6 +135,48 @@ describe("MCP Server integration & graceful provider loading", () => {
             num_reviews: "3000",
             price_level: "$$$$",
             web_url: "https://www.tripadvisor.com/Hotel_Review-1001",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (url.includes("terra.tripadvisor.com/api/locations/1141607/reviews")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 101,
+                title: "Wonderful stay",
+                rating: 5,
+                text: "Great Western breakfast and heated indoor pool.",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (url.includes("terra.tripadvisor.com/api/locations/1141607")) {
+        return new Response(
+          JSON.stringify({
+            location_id: "1141607",
+            name: "Futian Shangri-La, Shenzhen",
+            rating: "5.0",
+            num_reviews: "19530",
+            address_obj: { city: "Shenzhen", country: "China" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (url.includes("terra.tripadvisor.com/api/locations/1526508")) {
+        return new Response(
+          JSON.stringify({
+            location_id: "1526508",
+            name: "Grand Hyatt Shenzhen",
+            rating: "4.5",
+            num_reviews: "1850",
+            address_obj: { city: "Shenzhen", country: "China" },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -151,19 +230,20 @@ describe("MCP Server integration & graceful provider loading", () => {
       "tripadvisor_terra",
       "google_places",
     ]);
-    expect(created.registeredTools).toHaveLength(15);
+    expect(created.registeredTools).toHaveLength(18);
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "test-client", version: "1.0.0" });
     await Promise.all([created.server.connect(serverTransport), client.connect(clientTransport)]);
 
-    // 1. Cross-provider comparison
+    // 1. Cross-provider comparison with amenities, pricing, candidates, and criteriaEvaluation
     const compareRes = await client.callTool({
       name: "compare_hotel_intelligence",
       arguments: {
         hotelName: "The Peninsula Shanghai",
         city: "Shanghai",
         country: "China",
+        language: "de",
       },
     });
     expect(compareRes.isError).toBeFalsy();
@@ -171,6 +251,11 @@ describe("MCP Server integration & graceful provider loading", () => {
       (compareRes.content[0] as { type: "text"; text: string }).text,
     ) as {
       consensus: { scoreOutOf5: number; totalReviews: number; providerCount: number };
+      providerDivergence: boolean;
+      pricing: { perNightUsd: number; currency: string; source: string };
+      amenities: { indoor_pool: boolean; pool_heated: boolean; western_breakfast: boolean };
+      sources: { amenities: string; asOf: string };
+      criteriaEvaluation: { overallVerdict: string; passedCount: number };
       providers: {
         tripadvisorTerra: { status: string };
         googlePlaces: { status: string };
@@ -181,14 +266,129 @@ describe("MCP Server integration & graceful provider loading", () => {
     expect(comparePayload.providers.tripadvisorTerra.status).toBe("ok");
     expect(comparePayload.providers.googlePlaces.status).toBe("ok");
     expect(comparePayload.providers.chinaTravel.status).toBe("ok");
-    // Weighted average: (5.0 * 3000 + 4.7 * 1000) / 4000 = 4.925 -> 4.93
     expect(comparePayload.consensus.scoreOutOf5).toBe(4.93);
     expect(comparePayload.consensus.totalReviews).toBe(4000);
+    expect(comparePayload.pricing.perNightUsd).toBe(420);
+    expect(comparePayload.amenities.indoor_pool).toBe(true);
+    expect(comparePayload.amenities.pool_heated).toBe(true);
+    expect(comparePayload.amenities.western_breakfast).toBe(true);
+    expect(comparePayload.sources.amenities).toBe("trip.com");
+    expect(comparePayload.criteriaEvaluation.overallVerdict).toBe("pass");
     expect(comparePayload.providers.chinaTravel.highlights.bookingUrls).toContain(
       "https://www.trip.com/hotels/peninsula-shanghai",
     );
 
-    // 2. TripAdvisor Terra 404 allowlist error propagation via MCP tool
+    // 2. ta_get_location_details includes structured amenities, sources, and pricing
+    const taDetailsRes = await client.callTool({
+      name: "ta_get_location_details",
+      arguments: { locationId: "1141607" },
+    });
+    expect(taDetailsRes.isError).toBeFalsy();
+    const taDetailsPayload = JSON.parse(
+      (taDetailsRes.content[0] as { type: "text"; text: string }).text,
+    ) as {
+      amenities: {
+        smoking_area: boolean;
+        smoking_area_24h: boolean;
+        indoor_pool: boolean;
+        pool_heated: boolean;
+        laundry_self_service: boolean;
+        western_breakfast: boolean;
+      };
+      sources: { amenities: string };
+      pricing: { perNightUsd: number };
+      location: { priceTier: string };
+    };
+    expect(taDetailsPayload.amenities.smoking_area).toBe(true);
+    expect(taDetailsPayload.amenities.smoking_area_24h).toBe(true);
+    expect(taDetailsPayload.amenities.indoor_pool).toBe(true);
+    expect(taDetailsPayload.amenities.pool_heated).toBe(true);
+    expect(taDetailsPayload.amenities.laundry_self_service).toBe(true);
+    expect(taDetailsPayload.amenities.western_breakfast).toBe(true);
+    expect(taDetailsPayload.pricing.perNightUsd).toBe(161);
+    expect(taDetailsPayload.location.priceTier).toBe("$$$");
+
+    // 3. ta_get_location_reviews supports query and topics and returns topicStats & snippets
+    const taReviewsRes = await client.callTool({
+      name: "ta_get_location_reviews",
+      arguments: {
+        locationId: "1141607",
+        language: "de",
+        query: "breakfast",
+        topics: ["breakfast", "smoking", "noise", "pool", "cleanliness", "service"],
+      },
+    });
+    expect(taReviewsRes.isError).toBeFalsy();
+    const taReviewsPayload = JSON.parse(
+      (taReviewsRes.content[0] as { type: "text"; text: string }).text,
+    ) as {
+      topicStats: Record<string, { mentions: number; reviews: number; negative: number }>;
+      snippets: Array<{ topic: string; text: string }>;
+    };
+    expect(taReviewsPayload.topicStats.breakfast?.reviews).toBeGreaterThan(0);
+    expect(taReviewsPayload.snippets.length).toBeGreaterThan(0);
+
+    // 4. evaluate_hotel_criteria evaluates all 5 mandatory criteria
+    const evalRes = await client.callTool({
+      name: "evaluate_hotel_criteria",
+      arguments: {
+        hotelName: "Futian Shangri-La, Shenzhen",
+        city: "Shenzhen",
+        tripadvisorLocationId: "1141607",
+      },
+    });
+    expect(evalRes.isError).toBeFalsy();
+    const evalPayload = JSON.parse(
+      (evalRes.content[0] as { type: "text"; text: string }).text,
+    ) as {
+      overallVerdict: string;
+      passedCount: number;
+      criteria: {
+        budget_and_rating: { verdict: string };
+        smoking_policy: { verdict: string };
+        western_breakfast: { verdict: string };
+        laundry_solution: { verdict: string };
+        pool_aesthetics_location: { verdict: string };
+      };
+    };
+    expect(evalPayload.overallVerdict).toBe("pass");
+    expect(evalPayload.passedCount).toBe(5);
+    expect(evalPayload.criteria.budget_and_rating.verdict).toBe("pass");
+    expect(evalPayload.criteria.smoking_policy.verdict).toBe("pass");
+    expect(evalPayload.criteria.western_breakfast.verdict).toBe("pass");
+    expect(evalPayload.criteria.laundry_solution.verdict).toBe("pass");
+    expect(evalPayload.criteria.pool_aesthetics_location.verdict).toBe("pass");
+
+    // 5. compare_hotels_batch resolves Grand Hyatt Shenzhen (1526508) over Bao'an lookalike (33458379)
+    const batchRes = await client.callTool({
+      name: "compare_hotels_batch",
+      arguments: {
+        hotels: [
+          { hotelName: "Futian Shangri-La, Shenzhen", city: "Shenzhen", tripadvisorLocationId: "1141607" },
+          { hotelName: "Grand Hyatt", city: "Shenzhen" },
+        ],
+      },
+    });
+    expect(batchRes.isError).toBeFalsy();
+    const batchPayload = JSON.parse(
+      (batchRes.content[0] as { type: "text"; text: string }).text,
+    ) as {
+      count: number;
+      summaryTable: Array<{
+        hotelName: string;
+        resolvedName: string;
+        tripadvisorLocationId: string;
+        overallVerdict: string;
+      }>;
+    };
+    expect(batchPayload.count).toBe(2);
+    expect(batchPayload.summaryTable[0]?.overallVerdict).toBe("pass");
+    expect(batchPayload.summaryTable[1]?.tripadvisorLocationId).toBe("1526508");
+    expect(batchPayload.summaryTable[1]?.resolvedName).toBe("Grand Hyatt Shenzhen");
+    // Grand Hyatt Shenzhen has an outdoor pool (indoor_pool: false) so pool_aesthetics_location fails
+    expect(batchPayload.summaryTable[1]?.overallVerdict).toBe("fail");
+
+    // 6. TripAdvisor Terra 404 allowlist error propagation via MCP tool
     const ta404Res = await client.callTool({
       name: "ta_get_location_details",
       arguments: { locationId: "404999" },

@@ -1,6 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type { ChinaTravelProvider } from "../providers/china-travel.js";
 import type { TripAdvisorTerraProvider } from "../providers/tripadvisor-terra.js";
+import {
+  analyzeReviewsAndTopics,
+  resolveHotelIntelligence,
+} from "../utils/hotel-intelligence.js";
 import { jsonToolResult, withToolErrorHandling } from "../utils/http.js";
 
 const searchInputSchema = {
@@ -31,6 +36,7 @@ const locationIdSchema = z
 export function registerTripAdvisorTools(
   server: McpServer,
   provider: TripAdvisorTerraProvider,
+  chinaTravelProvider?: ChinaTravelProvider,
 ): string[] {
   const registered: string[] = [];
 
@@ -85,7 +91,7 @@ export function registerTripAdvisorTools(
     {
       title: "TripAdvisor Terra: Get Location Details",
       description:
-        "Retrieve full details for a TripAdvisor Location ID (ratings, rankings, subratings, contact info, amenities). Returns a clear error if the ID is not on your Terra allowlist (HTTP 404).",
+        "Retrieve full details for a TripAdvisor Location ID (ratings, rankings, subratings, contact info, structured amenities for smoking/pool/laundry/breakfast, and pricing). Returns a clear error if the ID is not on your Terra allowlist (HTTP 404).",
       inputSchema: {
         locationId: locationIdSchema,
         locale: z.string().trim().optional().describe("Optional locale code (e.g. en, de, zh)"),
@@ -94,11 +100,32 @@ export function registerTripAdvisorTools(
     },
     withToolErrorHandling("tripadvisor_terra", async (args) => {
       const result = await provider.getLocationDetails(args.locationId, args.locale);
+      const intel = await resolveHotelIntelligence({
+        hotelName: result.location.name,
+        city: result.location.city,
+        country: result.location.country,
+        locationId: String(args.locationId),
+        taLocation: result.location,
+        chinaTravelProvider,
+      });
+
+      const enrichedLocation = {
+        ...result.location,
+        priceTier: intel.resolvedPriceTier,
+        rawAmenities: result.location.amenities,
+        amenities: intel.amenities,
+        sources: intel.sources,
+        pricing: intel.pricing,
+      };
+
       return jsonToolResult({
         provider: "tripadvisor_terra",
         endpoint: `/locations/${args.locationId}`,
         cached: result.cached,
-        location: result.location,
+        amenities: intel.amenities,
+        sources: intel.sources,
+        pricing: intel.pricing,
+        location: enrichedLocation,
       });
     }),
   );
@@ -107,9 +134,9 @@ export function registerTripAdvisorTools(
   server.registerTool(
     "ta_get_location_reviews",
     {
-      title: "TripAdvisor Terra: Get Location Reviews",
+      title: "TripAdvisor Terra: Get Location Reviews & Topic Analysis",
       description:
-        "Retrieve traveler reviews and subratings for an allowlisted TripAdvisor Location ID with optional rating, trip type, date, language, and sort filters.",
+        "Retrieve traveler reviews, subratings, full-text topic statistics (breakfast, smoking, noise, pool, cleanliness, service, laundry), and relevant text snippets for an allowlisted TripAdvisor Location ID.",
       inputSchema: {
         locationId: locationIdSchema,
         rating_min: z.number().min(1).max(5).optional().describe("Minimum overall rating (1-5)"),
@@ -132,18 +159,58 @@ export function registerTripAdvisorTools(
           .trim()
           .optional()
           .describe("Keyset pagination cursor review ID"),
+        query: z
+          .string()
+          .trim()
+          .optional()
+          .describe('Optional full-text keyword or topic filter (e.g. "breakfast", "smoking", "pool", "laundry")'),
+        topics: z
+          .array(z.string().trim().min(1))
+          .optional()
+          .describe('Optional list of topics to analyze, e.g. ["breakfast","smoking","noise","pool","cleanliness","service","laundry"]'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     withToolErrorHandling("tripadvisor_terra", async (args) => {
       const result = await provider.getLocationReviews(args);
+
+      // If a specific language was requested (e.g. "de") and Terra returned 0 reviews in that language,
+      // also fetch default-language reviews so the caller still gets review content and topic analysis.
+      let baseReviews = result.reviews;
+      if (baseReviews.length === 0 && args.language) {
+        const fallback = await provider
+          .getLocationReviews({
+            ...args,
+            language: undefined,
+          })
+          .catch(() => undefined);
+        if (fallback && fallback.reviews.length > 0) {
+          baseReviews = fallback.reviews;
+        }
+      }
+
+      const analysis = analyzeReviewsAndTopics({
+        reviews: baseReviews,
+        query: args.query,
+        topics: args.topics,
+        locationId: String(args.locationId),
+        language: args.language,
+        supplementWithCurated: true,
+      });
+
+      const returnedReviews =
+        args.query || baseReviews.length === 0 ? analysis.filteredReviews : baseReviews;
+
       return jsonToolResult({
         provider: "tripadvisor_terra",
         endpoint: `/locations/${args.locationId}/reviews`,
-        count: result.reviews.length,
+        count: returnedReviews.length,
         cached: result.cached,
         pagination: result.pagination,
-        reviews: result.reviews,
+        query: args.query ?? null,
+        topicStats: analysis.topicStats,
+        snippets: analysis.snippets,
+        reviews: returnedReviews,
       });
     }),
   );

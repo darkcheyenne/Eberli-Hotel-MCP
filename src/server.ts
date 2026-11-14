@@ -11,7 +11,7 @@ import { registerTripAdvisorTools } from "./tools/tripadvisor-tools.js";
 import { TtlCache } from "./utils/cache.js";
 
 export const SERVER_NAME = "travel-hotel-intelligence-mcp";
-export const SERVER_VERSION = "1.0.0";
+export const SERVER_VERSION = "1.1.0";
 
 export interface CreateServerOptions {
   config: AppConfig;
@@ -68,7 +68,7 @@ export function createTravelMcpServer(options: CreateServerOptions): CreatedTrav
   if (tripadvisorTerra) {
     providers.tripadvisorTerra = tripadvisorTerra;
     enabledProviders.push("tripadvisor_terra");
-    const tools = registerTripAdvisorTools(server, tripadvisorTerra);
+    const tools = registerTripAdvisorTools(server, tripadvisorTerra, providers.chinaTravel);
     registeredTools.push(...tools);
     logger.info("Registered TripAdvisor Terra provider", { toolsCount: tools.length });
   } else {
