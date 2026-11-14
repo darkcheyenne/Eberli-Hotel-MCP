@@ -42,6 +42,7 @@ const envSchema = z.object({
   CHINA_TRAVEL_TIMEOUT_MS: z.coerce.number().int().min(1000).default(60000),
 
   TRIPADVISOR_TERRA_API_KEY: optionalNonEmptyString,
+  TRIPADVISOR_API_KEY: optionalNonEmptyString,
   TRIPADVISOR_TERRA_BASE_URL: z
     .string()
     .url()
@@ -121,7 +122,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       timeoutMs: data.CHINA_TRAVEL_TIMEOUT_MS,
     },
     tripadvisorTerra: {
-      apiKey: data.TRIPADVISOR_TERRA_API_KEY,
+      apiKey: data.TRIPADVISOR_TERRA_API_KEY ?? data.TRIPADVISOR_API_KEY,
       baseUrl: data.TRIPADVISOR_TERRA_BASE_URL.replace(/\/+$/, ""),
     },
     googlePlaces: {

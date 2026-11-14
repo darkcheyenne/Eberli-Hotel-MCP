@@ -45,6 +45,14 @@ docker run --rm -p 3000:3000 \
   eberli-hotel-mcp
 ```
 
+Or using Docker Compose (reads variables from `.env`):
+
+```bash
+cp .env.example .env
+# Set TRIPADVISOR_TERRA_API_KEY / GOOGLE_PLACES_API_KEY in .env
+docker compose up -d
+```
+
 The GitHub Actions workflow in [.github/workflows/docker.yml](.github/workflows/docker.yml) automatically runs `typecheck`, `build`, and `test`, builds a multi-arch (`linux/amd64`, `linux/arm64`) Docker image on every push/PR, and pushes images to **GitHub Container Registry (`ghcr.io/<owner>/<repo>`)** on pushes to `main` or `v*` tags (and optionally to Docker Hub if `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets are configured).
 
 ---

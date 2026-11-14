@@ -48,6 +48,14 @@ describe("loadConfig", () => {
     expect(config.allowedHosts).toEqual(["localhost", "api.internal"]);
   });
 
+  it("accepts TRIPADVISOR_API_KEY as an alias for TRIPADVISOR_TERRA_API_KEY", () => {
+    const config = loadConfig({
+      TRIPADVISOR_API_KEY: "alias-ta-key",
+    });
+
+    expect(config.tripadvisorTerra.apiKey).toBe("alias-ta-key");
+  });
+
   it("throws a descriptive error for invalid configuration values", () => {
     expect(() => loadConfig({ PORT: "99999" })).toThrow(/Invalid environment configuration/);
     expect(() => loadConfig({ TRIPADVISOR_TERRA_BASE_URL: "not-a-url" })).toThrow(
