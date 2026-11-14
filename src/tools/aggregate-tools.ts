@@ -85,17 +85,21 @@ async function queryTripAdvisorComparison(
     };
   }
 
+  let catalogFallbackLocation: TerraParsedLocation | undefined;
   let catalogFallbackMatch: Record<string, unknown> | undefined;
   const candidates: HotelCandidateMatch[] = [];
+
+  const taQuery = params.hotelName.toLowerCase().includes(params.city.toLowerCase())
+    ? params.hotelName
+    : `${params.hotelName} ${params.city}`;
 
   try {
     let locationId = params.tripadvisorLocationId;
 
     if (!locationId) {
       const allowlistSearch = await provider.searchLocations({
-        query: `${params.hotelName} ${params.city}`,
+        query: taQuery,
         category: "HOTEL",
-        locale: params.language,
         size: 5,
       });
 
@@ -131,9 +135,8 @@ async function queryTripAdvisorComparison(
         locationId = topAllowlisted.locationId;
       } else {
         const catalogSearch = await provider.searchCatalog({
-          query: `${params.hotelName} ${params.city}`,
+          query: taQuery,
           category: "HOTEL",
-          locale: params.language,
           size: 5,
         });
 
@@ -175,16 +178,18 @@ async function queryTripAdvisorComparison(
           };
         }
         locationId = topCatalog.locationId;
+        catalogFallbackLocation = topCatalog;
         catalogFallbackMatch = {
           locationId: topCatalog.locationId,
           name: topCatalog.name,
           address: topCatalog.address,
           webUrl: topCatalog.webUrl,
+          rating: topCatalog.rating,
         };
       }
     }
 
-    const details = await provider.getLocationDetails(locationId, params.language);
+    const details = await provider.getLocationDetails(locationId);
     let reviews: NormalizedReview[] | undefined;
 
     if (params.includeReviews) {
@@ -242,10 +247,13 @@ async function queryTripAdvisorComparison(
     if (error instanceof HttpError && error.status === 404) {
       return {
         status: "not_allowlisted",
+        rating: catalogFallbackLocation?.rating,
+        location: catalogFallbackLocation,
         candidates,
         data: {
           message: error.message,
           actionableHint: error.actionableHint,
+          ...(catalogFallbackLocation ? { location: catalogFallbackLocation } : {}),
           ...(catalogFallbackMatch ? { catalogMatch: catalogFallbackMatch } : {}),
         },
       };
