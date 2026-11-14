@@ -92,6 +92,21 @@ export async function startHttpServer(
 
   const sessions = new Map<string, ActiveHttpSession>();
 
+  app.get("/", (_req: Request, res: Response) => {
+    res.json({
+      name: SERVER_NAME,
+      version: SERVER_VERSION,
+      status: "ok",
+      transport: "streamable-http",
+      endpoints: {
+        mcp: "/mcp",
+        health: "/health",
+      },
+      enabledProviders: startupProbe.enabledProviders,
+      registeredTools: startupProbe.registeredTools,
+    });
+  });
+
   app.get("/health", (_req: Request, res: Response) => {
     res.json({
       status: "ok",

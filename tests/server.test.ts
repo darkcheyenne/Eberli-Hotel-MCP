@@ -228,6 +228,15 @@ describe("MCP Server integration & graceful provider loading", () => {
       const port = typeof address === "object" && address ? address.port : 0;
       expect(port).toBeGreaterThan(0);
 
+      const rootResp = await fetch(`http://127.0.0.1:${port}/`);
+      expect(rootResp.status).toBe(200);
+      const rootInfo = (await rootResp.json()) as {
+        status: string;
+        endpoints: { mcp: string; health: string };
+      };
+      expect(rootInfo.status).toBe("ok");
+      expect(rootInfo.endpoints).toEqual({ mcp: "/mcp", health: "/health" });
+
       const healthResp = await fetch(`http://127.0.0.1:${port}/health`);
       expect(healthResp.status).toBe(200);
       const health = (await healthResp.json()) as {
