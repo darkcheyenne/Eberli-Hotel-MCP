@@ -222,7 +222,7 @@ describe("MCP Server integration & graceful provider loading", () => {
       ),
     );
 
-    const started = await startHttpServer(config, logger, fetchMock);
+    const started = await startHttpServer(config, logger, { fetchImpl: fetchMock });
     try {
       const address = started.httpServer.address();
       const port = typeof address === "object" && address ? address.port : 0;

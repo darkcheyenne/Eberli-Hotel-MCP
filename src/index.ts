@@ -60,6 +60,11 @@ export async function startStdioServer(config: AppConfig, logger: Logger): Promi
   logger.info("Travel & Hotel Intelligence MCP server running on stdio transport.");
 }
 
+export interface StartHttpServerOptions {
+  fetchImpl?: typeof fetch;
+  registerSignalHandlers?: boolean;
+}
+
 export interface StartedHttpServer {
   httpServer: HttpServer;
   close: () => Promise<void>;
@@ -68,8 +73,9 @@ export interface StartedHttpServer {
 export async function startHttpServer(
   config: AppConfig,
   logger: Logger,
-  fetchImpl?: typeof fetch,
+  options: StartHttpServerOptions = {},
 ): Promise<StartedHttpServer> {
+  const { fetchImpl, registerSignalHandlers = false } = options;
   const app = createMcpExpressApp({
     host: config.host,
     allowedHosts: config.allowedHosts,
@@ -156,11 +162,14 @@ export async function startHttpServer(
         },
       });
 
+      let sessionClosed = false;
       transport.onclose = () => {
+        if (sessionClosed) return;
+        sessionClosed = true;
         if (transport.sessionId) {
           sessions.delete(transport.sessionId);
         }
-        void server.close();
+        void server.close().catch(() => undefined);
       };
 
       await server.connect(transport);
@@ -211,25 +220,54 @@ export async function startHttpServer(
     });
   });
 
+  let closingPromise: Promise<void> | undefined;
+  let onSigint: (() => void) | undefined;
+  let onSigterm: (() => void) | undefined;
+
   const closeAll = async (): Promise<void> => {
-    for (const [id, session] of sessions.entries()) {
-      await session.transport.close().catch(() => undefined);
-      await session.server.close().catch(() => undefined);
-      sessions.delete(id);
+    if (closingPromise) {
+      return closingPromise;
     }
-    await new Promise<void>((resolve, reject) => {
-      httpServer.close((err) => (err ? reject(err) : resolve()));
-    });
+
+    closingPromise = (async () => {
+      if (onSigint) process.off("SIGINT", onSigint);
+      if (onSigterm) process.off("SIGTERM", onSigterm);
+
+      for (const [id, session] of sessions.entries()) {
+        await session.transport.close().catch(() => undefined);
+        await session.server.close().catch(() => undefined);
+        sessions.delete(id);
+      }
+
+      if (httpServer.listening) {
+        await new Promise<void>((resolve, reject) => {
+          httpServer.close((err) => {
+            if (err && (err as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING") {
+              reject(err);
+              return;
+            }
+            resolve();
+          });
+          httpServer.closeIdleConnections?.();
+        });
+      }
+    })();
+
+    return closingPromise;
   };
 
-  const shutdown = async (signal: string): Promise<void> => {
-    logger.info(`Received ${signal}; closing HTTP MCP server and ${sessions.size} session(s).`);
-    await closeAll();
-    process.exit(0);
-  };
+  if (registerSignalHandlers) {
+    const shutdown = async (signal: string): Promise<void> => {
+      logger.info(`Received ${signal}; closing HTTP MCP server and ${sessions.size} session(s).`);
+      await closeAll();
+      process.exit(0);
+    };
 
-  process.once("SIGINT", () => void shutdown("SIGINT"));
-  process.once("SIGTERM", () => void shutdown("SIGTERM"));
+    onSigint = () => void shutdown("SIGINT");
+    onSigterm = () => void shutdown("SIGTERM");
+    process.once("SIGINT", onSigint);
+    process.once("SIGTERM", onSigterm);
+  }
 
   return { httpServer, close: closeAll };
 }
@@ -247,7 +285,7 @@ export async function main(): Promise<void> {
   const logger = createLogger(config.logLevel);
 
   if (config.transport === "http") {
-    await startHttpServer(config, logger);
+    await startHttpServer(config, logger, { registerSignalHandlers: true });
   } else {
     await startStdioServer(config, logger);
   }
