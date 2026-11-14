@@ -1,7 +1,6 @@
 services:
   eberli-hotel-mcp:
     image: ghcr.io/darkcheyenne/eberli-hotel-mcp:main
-    build: .
     container_name: eberli-hotel-mcp
     restart: unless-stopped
     ports:
