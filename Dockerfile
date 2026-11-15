@@ -16,7 +16,11 @@ WORKDIR /app
 ENV NODE_ENV=production \
     MCP_TRANSPORT=http \
     HOST=0.0.0.0 \
-    PORT=3000
+    PORT=3000 \
+    CACHE_TTL_SECONDS=86400 \
+    CACHE_STALE_TTL_SECONDS=604800 \
+    CACHE_MAX_ENTRIES=5000 \
+    CACHE_PERSIST_PATH=/tmp/eberli-hotel-mcp-cache.json
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force

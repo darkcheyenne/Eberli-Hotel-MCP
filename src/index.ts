@@ -83,7 +83,9 @@ export async function startHttpServer(
 
   const sharedCache = new TtlCache<unknown>({
     ttlSeconds: config.cacheTtlSeconds,
+    staleTtlSeconds: config.cacheStaleTtlSeconds,
     maxEntries: config.cacheMaxEntries,
+    persistFilePath: config.cachePersistPath,
   });
 
   // Validate provider readiness once at startup so warnings are logged immediately.
@@ -253,6 +255,8 @@ export async function startHttpServer(
         await session.server.close().catch(() => undefined);
         sessions.delete(id);
       }
+
+      sharedCache.flushToDisk();
 
       if (httpServer.listening) {
         await new Promise<void>((resolve, reject) => {

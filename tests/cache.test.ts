@@ -1,5 +1,9 @@
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { TtlCache, buildCacheKey } from "../src/utils/cache.js";
+import { HttpError } from "../src/utils/http.js";
 
 describe("TtlCache", () => {
   it("stores and expires entries according to TTL", () => {
@@ -58,9 +62,62 @@ describe("TtlCache", () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
-  it("builds deterministic keys regardless of property insertion order", () => {
-    const k1 = buildCacheKey("ta", { b: 2, a: "x", ignored: undefined });
-    const k2 = buildCacheKey("ta", { a: "x", b: 2 });
+  it("builds deterministic keys regardless of property insertion order and normalizes query casing", () => {
+    const k1 = buildCacheKey("ta", { b: 2, a: "  Futian Shangri-La  ", ignored: undefined });
+    const k2 = buildCacheKey("ta", { a: "futian shangri-la", b: 2 });
     expect(k1).toBe(k2);
+
+    // Case-sensitive Google Place IDs must remain case-sensitive
+    const p1 = buildCacheKey("gp", { placeId: "ChIJwaYX" });
+    const p2 = buildCacheKey("gp", { placeId: "chijwayx" });
+    expect(p1).not.toBe(p2);
+  });
+
+  it("serves stale cached value when upstream fails with HTTP 429 rate limit", async () => {
+    let now = 1000;
+    const cache = new TtlCache<string>({
+      ttlSeconds: 10,
+      staleTtlSeconds: 60,
+      now: () => now,
+    });
+
+    cache.set("hotel:1141607", "cached-hotel-payload");
+    // Advance past primary 10s TTL, but still within 60s stale grace window
+    now += 15_000;
+    expect(cache.get("hotel:1141607")).toBeUndefined();
+
+    const rateLimitedLoader = vi.fn(async () => {
+      throw new HttpError("Rate limit exceeded", {
+        provider: "tripadvisor_terra",
+        status: 429,
+        statusText: "Too Many Requests",
+        url: "https://terra.tripadvisor.com/api/locations/1141607",
+        body: {},
+      });
+    });
+
+    const fallback = await cache.getOrSet("hotel:1141607", rateLimitedLoader);
+    expect(fallback).toBe("cached-hotel-payload");
+    expect(rateLimitedLoader).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists and reloads cache entries from disk across restarts", () => {
+    const persistFilePath = join(tmpdir(), `eberli-mcp-cache-test-${Date.now()}.json`);
+    try {
+      const cache1 = new TtlCache<string>({
+        ttlSeconds: 300,
+        persistFilePath,
+      });
+      cache1.set("persisted-key", "persisted-value");
+      cache1.flushToDisk();
+
+      const cache2 = new TtlCache<string>({
+        ttlSeconds: 300,
+        persistFilePath,
+      });
+      expect(cache2.get("persisted-key")).toBe("persisted-value");
+    } finally {
+      rmSync(persistFilePath, { force: true });
+    }
   });
 });

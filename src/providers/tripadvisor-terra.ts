@@ -321,6 +321,31 @@ export class TripAdvisorTerraProvider {
       return { data: cachedHit as T, cached: true };
     }
 
+    if (notFoundContext?.locationId) {
+      const negKey = buildCacheKey("ta_404_not_allowlisted", {
+        locationId: notFoundContext.locationId,
+      });
+      const cached404 = this.cache.get(negKey) as
+        | { statusText: string; url: string; body: unknown; problemDetails?: HttpError["problemDetails"] }
+        | undefined;
+      if (cached404 !== undefined) {
+        const locationLabel = `location ID '${notFoundContext.locationId}'`;
+        throw new HttpError(
+          `TripAdvisor Terra API returned 404 Not Found for ${locationLabel}. In TripAdvisor Terra, locations not on your account allowlist return HTTP 404 rather than partial records.`,
+          {
+            provider: "tripadvisor_terra",
+            status: 404,
+            statusText: cached404.statusText,
+            url: cached404.url,
+            body: cached404.body,
+            problemDetails: cached404.problemDetails,
+            actionableHint:
+              "Use ta_search_catalog to verify the Location ID exists in TripAdvisor's catalog, and ensure this Location ID is added to your Terra account allowlist in the TripAdvisor Terra developer dashboard.",
+          },
+        );
+      }
+    }
+
     try {
       const data = (await this.cache.getOrSet(cacheKey, async () => {
         return fetchJson<T>({
@@ -340,6 +365,17 @@ export class TripAdvisorTerraProvider {
       return { data, cached: false };
     } catch (error) {
       if (error instanceof HttpError && error.status === 404) {
+        if (notFoundContext?.locationId) {
+          const negKey = buildCacheKey("ta_404_not_allowlisted", {
+            locationId: notFoundContext.locationId,
+          });
+          this.cache.set(negKey, {
+            statusText: error.statusText,
+            url: error.url,
+            body: error.body,
+            problemDetails: error.problemDetails,
+          });
+        }
         const locationLabel = notFoundContext?.locationId
           ? `location ID '${notFoundContext.locationId}'`
           : "the requested resource";
@@ -381,8 +417,33 @@ export class TripAdvisorTerraProvider {
     const { data, cached } = await this.request<TerraPagedLocationsResponse>(cacheKey, url);
 
     const rawItems = Array.isArray(data?.data) ? data.data : [];
+    const parsedLocations = rawItems.map((rawWrapper) => {
+      const parsed = TripAdvisorTerraProvider.parseLocation(rawWrapper);
+      const unwrapped = rawWrapper.location ?? rawWrapper;
+      // If searchLocations returned a full Terra v1 location payload (with subratings or descriptions),
+      // pre-warm the ta_location_details cache so a follow-up getLocationDetails(id) hits cache without an HTTP call.
+      if (
+        parsed.locationId !== "unknown" &&
+        (unwrapped.traveler_ratings !== undefined || unwrapped.descriptions !== undefined)
+      ) {
+        const defaultDetailsKey = buildCacheKey("ta_location_details", {
+          locationId: parsed.locationId,
+          locale: undefined,
+        });
+        this.cache.set(defaultDetailsKey, unwrapped);
+        if (input.locale) {
+          const localeDetailsKey = buildCacheKey("ta_location_details", {
+            locationId: parsed.locationId,
+            locale: input.locale,
+          });
+          this.cache.set(localeDetailsKey, unwrapped);
+        }
+      }
+      return parsed;
+    });
+
     return {
-      locations: rawItems.map(TripAdvisorTerraProvider.parseLocation),
+      locations: parsedLocations,
       pagination: data?.pagination,
       cached,
     };

@@ -292,7 +292,20 @@ export class GooglePlacesProvider {
         fetchImpl: this.fetchImpl,
       });
 
-      return (response.places ?? []).map(GooglePlacesProvider.parsePlace);
+      const parsed = (response.places ?? []).map(GooglePlacesProvider.parsePlace);
+      for (const place of parsed) {
+        if (place.placeId && place.placeId !== "unknown") {
+          const summaryKey = buildCacheKey("gplaces_details", {
+            cleanId: place.placeId,
+            languageCode: input.languageCode,
+            regionCode: input.regionCode,
+            includeReviews: false,
+            includePhotos: false,
+          });
+          this.cache.set(summaryKey, place);
+        }
+      }
+      return parsed;
     })) as GoogleParsedPlace[];
 
     return { places, cached: false };
@@ -345,7 +358,20 @@ export class GooglePlacesProvider {
         fetchImpl: this.fetchImpl,
       });
 
-      return (response.places ?? []).map(GooglePlacesProvider.parsePlace);
+      const parsed = (response.places ?? []).map(GooglePlacesProvider.parsePlace);
+      for (const place of parsed) {
+        if (place.placeId && place.placeId !== "unknown") {
+          const summaryKey = buildCacheKey("gplaces_details", {
+            cleanId: place.placeId,
+            languageCode: input.languageCode,
+            regionCode: input.regionCode,
+            includeReviews: false,
+            includePhotos: false,
+          });
+          this.cache.set(summaryKey, place);
+        }
+      }
+      return parsed;
     })) as GoogleParsedPlace[];
 
     return { places, cached: false };

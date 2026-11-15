@@ -27,7 +27,9 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 
   CACHE_TTL_SECONDS: z.coerce.number().int().min(0).default(3600),
+  CACHE_STALE_TTL_SECONDS: z.coerce.number().int().min(0).optional(),
   CACHE_MAX_ENTRIES: z.coerce.number().int().min(1).default(500),
+  CACHE_PERSIST_PATH: optionalNonEmptyString,
 
   HTTP_TIMEOUT_MS: z.coerce.number().int().min(100).default(15000),
   HTTP_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(3),
@@ -64,7 +66,9 @@ export interface AppConfig {
   allowedHosts?: string[];
   logLevel: LogLevel;
   cacheTtlSeconds: number;
+  cacheStaleTtlSeconds?: number;
   cacheMaxEntries: number;
+  cachePersistPath?: string;
   httpTimeoutMs: number;
   httpMaxRetries: number;
   chinaTravel: {
@@ -111,7 +115,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     allowedHosts,
     logLevel: data.LOG_LEVEL,
     cacheTtlSeconds: data.CACHE_TTL_SECONDS,
+    cacheStaleTtlSeconds: data.CACHE_STALE_TTL_SECONDS,
     cacheMaxEntries: data.CACHE_MAX_ENTRIES,
+    cachePersistPath: data.CACHE_PERSIST_PATH,
     httpTimeoutMs: data.HTTP_TIMEOUT_MS,
     httpMaxRetries: data.HTTP_MAX_RETRIES,
     chinaTravel: {

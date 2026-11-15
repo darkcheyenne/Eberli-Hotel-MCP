@@ -6,6 +6,7 @@ import type {
   TerraParsedLocation,
   TripAdvisorTerraProvider,
 } from "../providers/tripadvisor-terra.js";
+import { type TtlCache, buildCacheKey } from "../utils/cache.js";
 import {
   type CriteriaThresholds,
   type HotelCandidateMatch,
@@ -33,6 +34,7 @@ export interface ProviderRegistry {
   chinaTravel?: ChinaTravelProvider;
   tripadvisorTerra?: TripAdvisorTerraProvider;
   googlePlaces?: GooglePlacesProvider;
+  cache?: TtlCache<unknown>;
 }
 
 type ProviderSectionStatus = "ok" | "skipped" | "not_found" | "not_allowlisted" | "error";
@@ -462,7 +464,8 @@ export async function runSingleHotelComparison(
     criteria?: CriteriaThresholds;
   },
 ) {
-  const [taResult, gpResult, ctResult] = await Promise.all([
+  const executeComparison = async () => {
+    const [taResult, gpResult, ctResult] = await Promise.all([
     queryTripAdvisorComparison(providers.tripadvisorTerra, {
       hotelName: args.hotelName,
       city: args.city,
@@ -596,6 +599,29 @@ export async function runSingleHotelComparison(
       chinaTravel: { status: ctResult.status, ...ctResult.data },
     },
   };
+  };
+
+  if (providers.cache) {
+    const cmpKey = buildCacheKey("agg_hotel_comparison", {
+      hotelName: args.hotelName,
+      city: args.city,
+      country: args.country,
+      check_in: args.check_in,
+      check_out: args.check_out,
+      guests: args.guests,
+      tripadvisorLocationId: args.tripadvisorLocationId,
+      googlePlaceId: args.googlePlaceId,
+      includeReviews: args.includeReviews,
+      includeChinaTravel: args.includeChinaTravel,
+      language: args.language ?? "en",
+      criteria: args.criteria ? JSON.stringify(args.criteria) : undefined,
+    });
+    return (await providers.cache.getOrSet(cmpKey, executeComparison)) as Awaited<
+      ReturnType<typeof executeComparison>
+    >;
+  }
+
+  return executeComparison();
 }
 
 /**

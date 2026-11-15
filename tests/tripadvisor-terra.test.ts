@@ -95,6 +95,12 @@ describe("TripAdvisorTerraProvider", () => {
       expect(httpErr.actionableHint).toContain("ta_search_catalog");
       return true;
     });
+
+    // Second call for the same non-allowlisted ID must hit negative cache without a network request
+    await expect(provider.getLocationDetails("999999")).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("parses catalog search, reviews with subratings, and photos", async () => {

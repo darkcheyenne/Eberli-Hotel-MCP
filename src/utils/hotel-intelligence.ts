@@ -596,6 +596,7 @@ export function findCuratedProfile(params: {
   city?: string;
   locationId?: string;
   placeId?: string;
+  candidateNames?: Array<string | undefined>;
 }): CuratedHotelProfile | undefined {
   if (params.locationId) {
     const byLoc = CURATED_PROFILES.find((p) => p.locationIds?.includes(String(params.locationId)));
@@ -606,13 +607,23 @@ export function findCuratedProfile(params: {
     const byPlace = CURATED_PROFILES.find((p) => p.placeIds?.includes(cleanPlaceId));
     if (byPlace) return byPlace;
   }
-  if (params.hotelName) {
-    const normName = params.hotelName.toLowerCase().trim();
-    const normCity = params.city?.toLowerCase().trim();
+
+  const normCity = params.city?.toLowerCase().trim();
+  const namesToTry = [
+    params.hotelName,
+    ...(params.candidateNames ?? []),
+    params.hotelName && normCity ? `${params.hotelName} ${normCity}` : undefined,
+  ]
+    .filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+    .map((n) => n.toLowerCase().trim());
+
+  for (const normName of namesToTry) {
     for (const profile of CURATED_PROFILES) {
       if (
         profile.keys.some((k) => normName === k || normName.includes(k)) &&
-        (!normCity || profile.city.toLowerCase() === normCity || normName.includes(profile.city.toLowerCase()))
+        (!normCity ||
+          profile.city.toLowerCase() === normCity ||
+          normName.includes(profile.city.toLowerCase()))
       ) {
         return profile;
       }
@@ -849,10 +860,11 @@ export async function resolveHotelIntelligence(params: {
 }> {
   const asOf = todayIsoDate();
   const curated = findCuratedProfile({
-    hotelName: params.hotelName || params.taLocation?.name || params.gpPlace?.name,
+    hotelName: params.hotelName,
     city: params.city || params.taLocation?.city,
     locationId: params.locationId ?? params.taLocation?.locationId,
     placeId: params.placeId ?? params.gpPlace?.placeId,
+    candidateNames: [params.taLocation?.name, params.gpPlace?.name],
   });
 
   const textCorpus: Array<string | undefined> = [

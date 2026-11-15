@@ -39,7 +39,9 @@ export function createTravelMcpServer(options: CreateServerOptions): CreatedTrav
     options.cache ??
     new TtlCache<unknown>({
       ttlSeconds: config.cacheTtlSeconds,
+      staleTtlSeconds: config.cacheStaleTtlSeconds,
       maxEntries: config.cacheMaxEntries,
+      persistFilePath: config.cachePersistPath,
     });
 
   const server = new McpServer({
@@ -47,7 +49,7 @@ export function createTravelMcpServer(options: CreateServerOptions): CreatedTrav
     version: SERVER_VERSION,
   });
 
-  const providers: ProviderRegistry = {};
+  const providers: ProviderRegistry = { cache };
   const enabledProviders: string[] = [];
   const registeredTools: string[] = [];
 
