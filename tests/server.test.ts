@@ -478,6 +478,11 @@ describe("MCP Server integration & graceful provider loading", () => {
       expect(dashHtml).toContain("Eberli Hotel MCP — Live Dashboard");
       expect(dashHtml).toContain("Cache Hit-Rate");
 
+      // Verify that the inline <script> inside /dashboard has valid JavaScript syntax
+      const scriptMatch = dashHtml.match(/<script>([\s\S]*?)<\/script>/);
+      expect(scriptMatch?.[1]).toBeTruthy();
+      expect(() => new Function(scriptMatch![1]!)).not.toThrow();
+
       const rootHtmlResp = await fetch(`http://127.0.0.1:${port}/`, {
         headers: { Accept: "text/html,application/xhtml+xml" },
       });

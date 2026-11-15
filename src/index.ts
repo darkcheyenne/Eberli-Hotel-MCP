@@ -110,7 +110,8 @@ export async function startHttpServer(
   app.get("/", (req: Request, res: Response) => {
     const accept = req.headers.accept ?? "";
     if (accept.includes("text/html")) {
-      res.type("html").send(renderDashboardHtml());
+      res.setHeader("Cache-Control", "no-store");
+      res.type("html").send(renderDashboardHtml(buildStatsPayload()));
       return;
     }
     res.json({
@@ -130,10 +131,12 @@ export async function startHttpServer(
   });
 
   app.get("/dashboard", (_req: Request, res: Response) => {
-    res.type("html").send(renderDashboardHtml());
+    res.setHeader("Cache-Control", "no-store");
+    res.type("html").send(renderDashboardHtml(buildStatsPayload()));
   });
 
   app.get("/api/stats", (_req: Request, res: Response) => {
+    res.setHeader("Cache-Control", "no-store");
     res.json(buildStatsPayload());
   });
 

@@ -38,7 +38,10 @@ export function buildDashboardStatsPayload(ctx: DashboardContext) {
   };
 }
 
-export function renderDashboardHtml(): string {
+export function renderDashboardHtml(initialStats?: ReturnType<typeof buildDashboardStatsPayload>): string {
+  const initialJson = initialStats
+    ? JSON.stringify(initialStats).replace(/</g, "\\u003c")
+    : "null";
   return `<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -435,7 +438,16 @@ export function renderDashboardHtml(): string {
   </div>
 
   <script>
-    let lastData = null;
+    let lastData = ${initialJson};
+
+    function shortenUrl(rawUrl) {
+      try {
+        const parsed = new URL(rawUrl);
+        return parsed.pathname + parsed.search;
+      } catch (_e) {
+        return String(rawUrl || '');
+      }
+    }
 
     function formatUptime(sec) {
       const d = Math.floor(sec / 86400);
@@ -568,7 +580,7 @@ export function renderDashboardHtml(): string {
       if (telemetry.recentHttpCalls && telemetry.recentHttpCalls.length > 0) {
         httpBody.innerHTML = telemetry.recentHttpCalls.slice(0, 25).map(h => {
           const stClass = h.status >= 200 && h.status < 300 ? 'badge-ok' : h.status === 404 ? 'badge-warn' : 'badge-err';
-          const shortUrl = h.url.replace(/^https?:\/\/[^/]+/, '');
+          const shortUrl = shortenUrl(h.url);
           return '<tr>' +
             '<td>' + formatTime(h.timestamp) + '</td>' +
             '<td><span class="badge badge-purple">' + escapeHtml(h.provider) + '</span></td>' +
@@ -621,7 +633,7 @@ export function renderDashboardHtml(): string {
 
     async function fetchStats() {
       try {
-        const res = await fetch('/api/stats');
+        const res = await fetch('/api/stats?t=' + Date.now(), { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
         render(data);
@@ -633,6 +645,9 @@ export function renderDashboardHtml(): string {
     document.getElementById('refresh-btn').addEventListener('click', fetchStats);
     document.getElementById('tool-filter').addEventListener('input', renderToolTable);
 
+    if (lastData) {
+      render(lastData);
+    }
     fetchStats();
     setInterval(() => {
       if (document.getElementById('auto-refresh').checked) {
