@@ -9,6 +9,7 @@ import { registerChinaTools } from "./tools/china-tools.js";
 import { registerGooglePlacesTools } from "./tools/google-places-tools.js";
 import { registerTripAdvisorTools } from "./tools/tripadvisor-tools.js";
 import { TtlCache } from "./utils/cache.js";
+import { globalTelemetry } from "./utils/telemetry.js";
 
 export const SERVER_NAME = "travel-hotel-intelligence-mcp";
 export const SERVER_VERSION = "1.1.0";
@@ -48,6 +49,42 @@ export function createTravelMcpServer(options: CreateServerOptions): CreatedTrav
     name: SERVER_NAME,
     version: SERVER_VERSION,
   });
+
+  // Instrument all registered MCP tools for Dashboard telemetry without altering their schemas or outputs
+  const originalRegisterTool = server.registerTool.bind(server);
+  server.registerTool = ((
+    name: string,
+    configObj: unknown,
+    cb: (args: unknown, extra: unknown) => Promise<{ isError?: boolean; content?: Array<{ text?: string }> }>,
+  ) => {
+    const wrappedCb = async (args: unknown, extra: unknown) => {
+      const startMs = Date.now();
+      const beforeCache = cache.stats();
+      const result = await cb(args, extra);
+      const afterCache = cache.stats();
+      const isError = Boolean(result?.isError);
+      let errorMessage: string | undefined;
+      if (isError && result?.content?.[0]?.text) {
+        try {
+          const parsedErr = JSON.parse(result.content[0].text) as { message?: string };
+          errorMessage = parsedErr.message;
+        } catch {
+          errorMessage = result.content[0].text.slice(0, 120);
+        }
+      }
+      globalTelemetry.recordToolCall({
+        toolName: name,
+        args,
+        durationMs: Date.now() - startMs,
+        cacheHitsDelta: Math.max(0, afterCache.hits - beforeCache.hits),
+        cacheMissesDelta: Math.max(0, afterCache.misses - beforeCache.misses),
+        isError,
+        errorMessage,
+      });
+      return result;
+    };
+    return (originalRegisterTool as (...a: unknown[]) => unknown)(name, configObj, wrappedCb);
+  }) as typeof server.registerTool;
 
   const providers: ProviderRegistry = { cache };
   const enabledProviders: string[] = [];

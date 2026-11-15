@@ -10,8 +10,10 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { Request, Response } from "express";
 import { type AppConfig, type Logger, createLogger, loadConfig } from "./config.js";
+import { buildDashboardStatsPayload, renderDashboardHtml } from "./dashboard.js";
 import { SERVER_NAME, SERVER_VERSION, createTravelMcpServer } from "./server.js";
 import { TtlCache } from "./utils/cache.js";
+import { globalTelemetry } from "./utils/telemetry.js";
 
 interface CliOverrides {
   transport?: "stdio" | "http";
@@ -94,7 +96,23 @@ export async function startHttpServer(
 
   const sessions = new Map<string, ActiveHttpSession>();
 
-  app.get("/", (_req: Request, res: Response) => {
+  const buildStatsPayload = () =>
+    buildDashboardStatsPayload({
+      serverName: SERVER_NAME,
+      serverVersion: SERVER_VERSION,
+      enabledProviders: startupProbe.enabledProviders,
+      registeredTools: startupProbe.registeredTools,
+      activeSessions: () => sessions.size,
+      cache: sharedCache,
+      telemetry: globalTelemetry,
+    });
+
+  app.get("/", (req: Request, res: Response) => {
+    const accept = req.headers.accept ?? "";
+    if (accept.includes("text/html")) {
+      res.type("html").send(renderDashboardHtml());
+      return;
+    }
     res.json({
       name: SERVER_NAME,
       version: SERVER_VERSION,
@@ -104,9 +122,19 @@ export async function startHttpServer(
         mcp: "/mcp",
         health: "/health",
       },
+      dashboardUrl: "/dashboard",
+      statsUrl: "/api/stats",
       enabledProviders: startupProbe.enabledProviders,
       registeredTools: startupProbe.registeredTools,
     });
+  });
+
+  app.get("/dashboard", (_req: Request, res: Response) => {
+    res.type("html").send(renderDashboardHtml());
+  });
+
+  app.get("/api/stats", (_req: Request, res: Response) => {
+    res.json(buildStatsPayload());
   });
 
   app.get("/health", (_req: Request, res: Response) => {

@@ -465,6 +465,43 @@ describe("MCP Server integration & graceful provider loading", () => {
       ) as { places: Array<{ name: string }> };
       expect(payload.places[0]?.name).toBe("HTTP Hotel");
 
+      // Second identical call should hit cache
+      await client.callTool({
+        name: "gplaces_search_text",
+        arguments: { textQuery: "HTTP Hotel" },
+      });
+
+      const dashResp = await fetch(`http://127.0.0.1:${port}/dashboard`);
+      expect(dashResp.status).toBe(200);
+      expect(dashResp.headers.get("content-type")).toContain("text/html");
+      const dashHtml = await dashResp.text();
+      expect(dashHtml).toContain("Eberli Hotel MCP — Live Dashboard");
+      expect(dashHtml).toContain("Cache Hit-Rate");
+
+      const rootHtmlResp = await fetch(`http://127.0.0.1:${port}/`, {
+        headers: { Accept: "text/html,application/xhtml+xml" },
+      });
+      expect(rootHtmlResp.status).toBe(200);
+      expect(rootHtmlResp.headers.get("content-type")).toContain("text/html");
+
+      const statsResp = await fetch(`http://127.0.0.1:${port}/api/stats`);
+      expect(statsResp.status).toBe(200);
+      const statsJson = (await statsResp.json()) as {
+        cache: { hits: number; misses: number; hitRatePercent: number };
+        telemetry: {
+          totalToolCalls: number;
+          recentToolCalls: Array<{ toolName: string; servedFromCache: boolean }>;
+        };
+      };
+      expect(statsJson.cache.hits).toBeGreaterThanOrEqual(1);
+      expect(statsJson.cache.hitRatePercent).toBeGreaterThan(0);
+      expect(statsJson.telemetry.totalToolCalls).toBeGreaterThanOrEqual(2);
+      expect(
+        statsJson.telemetry.recentToolCalls.some(
+          (c) => c.toolName === "gplaces_search_text" && c.servedFromCache === true,
+        ),
+      ).toBe(true);
+
       await transport.terminateSession();
       await client.close();
     } finally {

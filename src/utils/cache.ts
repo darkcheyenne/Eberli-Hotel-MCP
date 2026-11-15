@@ -230,6 +230,59 @@ export class TtlCache<T = unknown> {
     };
   }
 
+  detailedStats(): CacheStats & {
+    hitRatePercent: number;
+    maxEntries: number;
+    staleRetainedCount: number;
+    staleTtlSeconds: number;
+    inFlightCount: number;
+    entriesByPrefix: Record<string, number>;
+    recentEntries: Array<{ key: string; prefix: string; expiresInSeconds: number; isStale: boolean }>;
+  } {
+    this.pruneFullyExpired();
+    const base = this.stats();
+    const totalLookups = base.hits + base.misses;
+    const hitRatePercent =
+      totalLookups > 0 ? Math.round((base.hits / totalLookups) * 1000) / 10 : 0;
+
+    const current = this.now();
+    let staleRetainedCount = 0;
+    const entriesByPrefix: Record<string, number> = {};
+    const recentEntries: Array<{
+      key: string;
+      prefix: string;
+      expiresInSeconds: number;
+      isStale: boolean;
+    }> = [];
+
+    for (const [key, entry] of this.store.entries()) {
+      const isStale = current >= entry.expiresAt;
+      if (isStale) {
+        staleRetainedCount += 1;
+      } else {
+        const prefix = key.split(":")[0] ?? "other";
+        entriesByPrefix[prefix] = (entriesByPrefix[prefix] ?? 0) + 1;
+      }
+      recentEntries.push({
+        key: key.length > 140 ? `${key.slice(0, 140)}…` : key,
+        prefix: key.split(":")[0] ?? "other",
+        expiresInSeconds: Math.max(0, Math.round((entry.expiresAt - current) / 1000)),
+        isStale,
+      });
+    }
+
+    return {
+      ...base,
+      hitRatePercent,
+      maxEntries: this.maxEntries,
+      staleRetainedCount,
+      staleTtlSeconds: Math.round(this.staleTtlMs / 1000),
+      inFlightCount: this.inFlight.size,
+      entriesByPrefix,
+      recentEntries: recentEntries.reverse().slice(0, 30),
+    };
+  }
+
   flushToDisk(): void {
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);

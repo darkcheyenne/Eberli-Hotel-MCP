@@ -1,3 +1,5 @@
+import { globalTelemetry } from "./telemetry.js";
+
 export type ProviderName =
   | "china_travel"
   | "tripadvisor_terra"
@@ -238,6 +240,7 @@ export async function fetchJson<T = unknown>(options: HttpRequestOptions): Promi
   }
 
   let lastError: unknown;
+  const startedAt = Date.now();
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -254,6 +257,14 @@ export async function fetchJson<T = unknown>(options: HttpRequestOptions): Promi
       const parsedBody = await parseResponseBody(response);
 
       if (response.ok) {
+        globalTelemetry.recordHttpCall({
+          provider,
+          method,
+          url,
+          status: response.status,
+          durationMs: Date.now() - startedAt,
+          attempts: attempt + 1,
+        });
         return parsedBody as T;
       }
 
@@ -283,6 +294,15 @@ export async function fetchJson<T = unknown>(options: HttpRequestOptions): Promi
         continue;
       }
 
+      globalTelemetry.recordHttpCall({
+        provider,
+        method,
+        url,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        attempts: attempt + 1,
+        error: message,
+      });
       throw httpError;
     } catch (error) {
       if (error instanceof HttpError) {
@@ -291,6 +311,14 @@ export async function fetchJson<T = unknown>(options: HttpRequestOptions): Promi
 
       // If caller aborted explicitly (not timeout), do not retry
       if (signal?.aborted) {
+        globalTelemetry.recordHttpCall({
+          provider,
+          method,
+          url,
+          durationMs: Date.now() - startedAt,
+          attempts: attempt + 1,
+          error: "Request aborted by caller",
+        });
         throw new NetworkError(provider, url, "Request aborted by caller", error);
       }
 
@@ -309,6 +337,14 @@ export async function fetchJson<T = unknown>(options: HttpRequestOptions): Promi
         continue;
       }
 
+      globalTelemetry.recordHttpCall({
+        provider,
+        method,
+        url,
+        durationMs: Date.now() - startedAt,
+        attempts: attempt + 1,
+        error: structuredError.message,
+      });
       throw structuredError;
     }
   }
